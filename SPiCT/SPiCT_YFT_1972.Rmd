@@ -1,0 +1,541 @@
+---
+title: "Stochastic surplus production model in continuous time (SPiCT)"
+author: "Marta Cousido-Rocha and Francisco Izquierdo"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    number_sections: no
+    toc: yes
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8)
+```
+
+```{r,warning=FALSE,message=FALSE}
+#remotes::install_github("tokami/spict/spict", ref="fix130")
+library(spict)
+library(readxl)
+```
+
+# Preparing data: Biomass catch time series {.tabset}
+
+
+Load data:
+
+```{r,warning=FALSE}
+load("data_SPiCT new CPUE & original CPUE& Catch & LFD.RData")
+attach(objs)
+```
+
+Sum catch data across fleets:
+
+```{r,warning=FALSE}
+library(plyr)
+catch<-ddply(catch_by_fleet, .(year,seas), summarize,  cat=sum(catch))
+```
+
+Weight-length relationship:
+
+
+```{r,warning=FALSE}
+len=as.numeric(substr(colnames(LFD_by_fleet)[-(1:6)], 2, 4))
+a=2.459*10^{-5}
+b=2.9667
+wei=a*len^b
+```
+
+LFDs sum across fleets:
+
+```{r,warning=FALSE}
+library(dplyr)
+
+LFD<-LFD_by_fleet %>% group_by(Yr, Seas) %>% summarise(across(everything(), list(sum)))
+LFD=LFD[,-(3:6)]
+```
+
+
+
+Combine catch (numbers), LFDs and weight to obtain catch (tons):
+
+```{r,warning=FALSE}
+l=dim(LFD)[1]
+
+resul=as.data.frame(LFD[,1:2])
+resul$cat=rep(0,l)
+for (i in 1:l){
+  
+  tot=sum(LFD[i,-c(1,2)])
+  
+  lfd=(LFD[i,-c(1,2)]*(catch[i,3]/tot))
+  
+  resul[i,3]=sum(lfd*wei)
+}
+
+# Sum across year:
+
+catch_year=ddply(resul, .(Yr), summarize,  cat=sum(cat))
+```
+
+
+List to save SPiCT trajectories:
+
+```{r,warning=FALSE,include=FALSE}
+Bio_spict=list()
+F_spict=list()
+```
+
+
+
+# Run 1: Year time series (Bayesian CPUE) {.tabset}
+
+```{r,warning=FALSE}
+ind1=which(unique(resul$Yr)==1972)
+ind2=which(unique(resul$Yr)==2015)
+inp1 <- list(timeC = unique(resul$Yr)[ind1:ind2], obsC =catch_year$cat[ind1:ind2],
+            timeI = list(cpue_year_besag$year+0.5),
+            obsI = list(cpue_year_besag$obs_sum))
+
+inp1=check.inp(inp1)
+
+```
+
+The data can be plotted using the command:
+
+```{r,warning=FALSE,fig.height=5}
+source("functions.R")
+source("plotting.R")
+plotspict.data.adp(inp1)
+
+```
+
+
+The model is fitted to data by running:
+
+```{r,warning=FALSE}
+res1 <- fit.spict(inp1)
+```
+
+The results are summarized using:
+
+
+```{r,warning=FALSE}
+capture.output(summary(res1))
+plot(res1,CI = 0.9)
+```
+
+```{r,warning=FALSE}
+par(mfcol=c(1,2))
+plotspict.biomass(res1)
+plotspict.f(res1)
+```
+
+
+```{r,warning=FALSE}
+par(mfcol=c(1,1))
+plotspict.production(res1)
+```
+
+
+**Checklist for the acceptance of a SPiCT assessment** 
+  
+  
+```{r,warning=FALSE}
+res1$opt$convergence 
+```
+
+```{r,warning=FALSE}
+all(is.finite(res1$sd))  
+```
+
+```{r,warning=FALSE}
+r1 <- calc.osa.resid(res1)
+plotspict.diagnostic(r1,lag.max =8)
+```
+
+```{r,warning=FALSE}
+r1<- res1
+rep1=retro(r1, nretroyear=5)
+plotspict.retro(rep1)
+```
+
+
+Confidence intervals of $F/F_{msy}$ and $B/B_{msy}$ estimates.
+
+```{r,warning=FALSE}
+fit=res1
+
+get.par("logFmFmsy", fit, exp=TRUE, CI = 0.9)
+get.par("logBmBmsy", fit, exp=TRUE, CI = 0.9)
+```
+
+I also compute AIC value:
+  
+```{r,warning=FALSE}
+get.AIC(res1)
+```
+
+Save biomass/F trends:
+
+```{r}
+bio1=get.par("logB", res1, exp = TRUE)[seq(1,length(inp1$time),by=16),2]
+F1=get.par("logFs", res1, exp = TRUE)[seq(1,length(inp1$time),by=16),2]
+
+Bio_spict$bio_year_besag=bio1
+F_spict$F_year_besag=F1
+```
+
+# Run 2: Year time series (Original CPUE) {.tabset}
+
+```{r,warning=FALSE}
+ind1=which(unique(resul$Yr)==1972)
+ind2=which(unique(resul$Yr)==2015)
+inp2 <- list(timeC = unique(resul$Yr)[ind1:ind2], obsC =catch_year$cat[ind1:ind2],
+            timeI = list(cpue_year_original$year+0.5),
+            obsI = list(cpue_year_original$obs_sum))
+inp2=check.inp(inp2)
+
+```
+
+The data can be plotted using the command:
+
+```{r,warning=FALSE,fig.height=5}
+plotspict.data.adp(inp2)
+
+```
+
+
+The model is fitted to data by running:
+```{r,warning=FALSE}
+res2 <- fit.spict(inp2)
+```
+
+The results are summarized using:
+
+
+```{r,warning=FALSE}
+capture.output(summary(res2))
+plot(res2,CI = 0.9)
+```
+
+```{r,warning=FALSE,eval=FALSE, include=FALSE}
+par(mfcol=c(1,2))
+plotspict.biomass(res2)
+plotspict.f(res2)
+```
+
+
+```{r,warning=FALSE}
+par(mfcol=c(1,1))
+plotspict.production(res2)
+```
+
+
+
+
+**Checklist for the acceptance of a SPiCT assessment** 
+  
+  
+```{r,warning=FALSE}
+res2$opt$convergence 
+```
+
+```{r,warning=FALSE}
+all(is.finite(res2$sd))  
+```
+
+```{r,warning=FALSE}
+r2 <- calc.osa.resid(res2)
+plotspict.diagnostic(r2,lag.max =8)
+```
+
+```{r,warning=FALSE}
+r2<- res2
+rep1=retro(r2, nretroyear=5)
+plotspict.retro(rep1)
+```
+
+
+Confidence intervals of $F/F_{msy}$ and $B/B_{msy}$ estimates.
+
+```{r,warning=FALSE}
+fit=res2
+
+get.par("logFmFmsy", fit, exp=TRUE, CI = 0.9)
+get.par("logBmBmsy", fit, exp=TRUE, CI = 0.9)
+```
+
+I also compute AIC value:
+  
+```{r,warning=FALSE}
+get.AIC(res2)
+```
+
+Save biomass/F trends:
+
+```{r}
+bio2=get.par("logB", res2, exp = TRUE)[seq(1,length(inp2$time),by=16),2]
+F2=get.par("logFs", res2, exp = TRUE)[seq(1,length(inp2$time),by=16),2]
+
+Bio_spict$bio_year_original=bio2
+F_spict$F_year_original=F2
+```
+
+
+# Run 3: Seas catch and CPUE time series (Bayesian CPUE) {.tabset}
+
+```{r,warning=FALSE}
+
+ind=which(resul[,2]==1)
+resul[ind,2]=0
+ind1=which(resul[,2]==4)
+resul[ind1,2]=0.25
+ind2=which(resul[,2]==7)
+resul[ind2,2]=0.5
+ind3=which(resul[,2]==10)
+resul[ind3,2]=0.75
+seq_I=rep(c(0,0.25,0.5,0.75),length(unique(cpue_seas_besag$year)))
+ind1=min(which(resul[,1]==1972))
+ind2=max(which(resul[,1]==2015))
+inp3 <- list(timeC = resul[ind1:ind2,1]+resul[ind1:ind2,2], obsC = resul[ind1:ind2,3],
+            timeI = list(cpue_seas_besag$year+seq_I),
+            obsI = list(cpue_seas_besag$obs))
+
+inp3=check.inp(inp3)
+
+```
+
+The data can be plotted using the command:
+
+```{r,warning=FALSE,fig.height=5}
+plotspict.data.adp(inp3)
+
+```
+
+
+The model is fitted to data by running:
+```{r,warning=FALSE}
+res3 <- fit.spict(inp3)
+```
+
+The results are summarized using:
+
+
+```{r,warning=FALSE}
+capture.output(summary(res3))
+plot(res3,CI = 0.9)
+```
+
+```{r,warning=FALSE,eval=FALSE, include=FALSE}
+par(mfcol=c(1,2))
+plotspict.biomass(res3)
+plotspict.f(res3)
+```
+
+
+```{r,warning=FALSE}
+par(mfcol=c(1,1))
+plotspict.production(res3)
+```
+
+
+
+**Checklist for the acceptance of a SPiCT assessment** 
+  
+  
+```{r,warning=FALSE}
+res3$opt$convergence 
+```
+
+```{r,warning=FALSE}
+all(is.finite(res3$sd))  
+```
+
+```{r,warning=FALSE}
+r3 <- calc.osa.resid(res3)
+plotspict.diagnostic(r3,lag.max =8)
+```
+
+```{r,warning=FALSE}
+r3<- res3
+rep3=retro(r3, nretroyear=5)
+plotspict.retro(rep3)
+```
+
+
+Confidence intervals of $F/F_{msy}$ and $B/B_{msy}$ estimates.
+
+```{r,warning=FALSE}
+fit=res3
+
+get.par("logFmFmsy", fit, exp=TRUE, CI = 0.9)
+get.par("logBmBmsy", fit, exp=TRUE, CI = 0.9)
+```
+
+I also compute AIC value:
+  
+```{r,warning=FALSE}
+get.AIC(res3)
+```
+
+Save biomass/F trends:
+
+```{r}
+bio3=get.par("logB", res3, exp = TRUE)[seq(1,length(inp3$time),by=4),2]
+F3=get.par("logFs", res3, exp = TRUE)[seq(1,length(inp3$time),by=4),2]
+
+Bio_spict$bio_seas_besag=bio3
+F_spict$F_seas_besag=F3
+```
+
+
+# Run 4: Seas catch and CPUE time series (Original CPUE) {.tabset}
+
+```{r,warning=FALSE}
+
+ind=which(resul[,2]==1)
+resul[ind,2]=0
+ind1=which(resul[,2]==4)
+resul[ind1,2]=0.25
+ind2=which(resul[,2]==7)
+resul[ind2,2]=0.5
+ind3=which(resul[,2]==10)
+resul[ind3,2]=0.75
+seq_I=rep(c(0,0.25,0.5,0.75),length(unique(cpue_seas_besag$year)))
+ind1=min(which(resul[,1]==1972))
+ind2=max(which(resul[,1]==2015))
+inp4 <- list(timeC = resul[ind1:ind2,1]+resul[ind1:ind2,2], obsC = resul[ind1:ind2,3],
+            timeI = list(cpue_seas_original$year+seq_I),
+            obsI = list(cpue_seas_original$obs))
+
+inp4=check.inp(inp4)
+
+```
+
+The data can be plotted using the command:
+
+```{r,warning=FALSE,fig.height=5}
+plotspict.data.adp(inp4)
+
+```
+
+
+The model is fitted to data by running:
+```{r,warning=FALSE}
+res4 <- fit.spict(inp4)
+```
+
+The results are summarized using:
+
+
+```{r,warning=FALSE}
+capture.output(summary(res4))
+plot(res4,CI = 0.9)
+```
+
+```{r,warning=FALSE,eval=FALSE, include=FALSE}
+par(mfcol=c(1,2))
+plotspict.biomass(res4)
+plotspict.f(res4)
+```
+
+
+```{r,warning=FALSE}
+par(mfcol=c(1,1))
+plotspict.production(res4)
+```
+
+
+
+**Checklist for the acceptance of a SPiCT assessment** 
+  
+  
+```{r,warning=FALSE}
+res4$opt$convergence 
+```
+
+```{r,warning=FALSE}
+all(is.finite(res4$sd))  
+```
+
+```{r,warning=FALSE}
+r4 <- calc.osa.resid(res4)
+plotspict.diagnostic(r4,lag.max =8)
+```
+
+```{r,warning=FALSE}
+r4<- res4
+rep4=retro(r4, nretroyear=5)
+plotspict.retro(rep4)
+```
+
+
+Confidence intervals of $F/F_{msy}$ and $B/B_{msy}$ estimates.
+
+```{r,warning=FALSE}
+fit=res4
+
+get.par("logFmFmsy", fit, exp=TRUE, CI = 0.9)
+get.par("logBmBmsy", fit, exp=TRUE, CI = 0.9)
+```
+
+I also compute AIC value:
+  
+```{r,warning=FALSE}
+get.AIC(res4)
+```
+Save biomass/F trends:
+
+```{r}
+bio4=get.par("logB", res4, exp = TRUE)[seq(1,length(inp4$time),by=4),2]
+F4=get.par("logFs", res4, exp = TRUE)[seq(1,length(inp4$time),by=4),2]
+
+Bio_spict$bio_seas_original=bio4
+F_spict$F_seas_original=F4
+```
+
+
+
+
+
+```{r}
+
+save(Bio_spict, file="Bio_spict.RData")
+save(F_spict, file="F_spict.RData")
+```
+
+# Comparing to SS {.tabset}
+
+```{r}
+load("data_SPiCT new CPUE & original CPUE & Bio.RData")
+bio=objs$bio
+a=c(Bio_spict$bio_seas_original,Bio_spict$bio_seas_besag,Bio_spict$bio_year_original,
+    Bio_spict$bio_year_besag,bio$bio)
+ind1=min(which(bio$year==1972))
+ind2=max(which(bio$year==2015))
+
+par(mar = c(5, 4, 1.4, 0.2))
+plot(bio$year[ind1:ind2],bio$bio[ind1:ind2], col="black", type="l",lwd=2, ylim=c(min(a),max(a)),xlab="",ylab="")
+
+ind1=min(which(resul[,1]==1972))
+ind2=max(which(resul[,1]==2015))
+ind3=max(which(names(Bio_spict$bio_seas_original)=="2015.75"))
+lines(as.numeric(names(Bio_spict$bio_seas_original)[1:ind3]), Bio_spict$bio_seas_original[1:ind3],col="green",lwd=2)
+
+
+ind3=max(which(names(Bio_spict$bio_seas_besag)=="2015.75"))
+lines(as.numeric(names(Bio_spict$bio_seas_besag)[1:ind3]),Bio_spict$bio_seas_besag[1:ind3], col="grey",lwd=2)
+
+ind1=which(unique(resul$Yr)==1972)
+ind2=which(unique(resul$Yr)==2015)
+ind3=which(names(Bio_spict$bio_year_besag)=="2015")
+lines(unique(resul$Yr)[ind1:ind2],Bio_spict$bio_year_original[1:ind3], col="blue",lwd=2)
+lines(unique(resul$Yr)[ind1:ind2],Bio_spict$bio_year_besag[1:ind3], col="red",lwd=2)
+
+legend("topleft", legend=c("SS","bio_seas_original", "bio_seas_besag","bio_year_original","bio_year_besag"),
+       col=c("black","green","grey","blue","red"), cex=1, lty=1, bty='n',y.intersp=0.8)
+```
+
